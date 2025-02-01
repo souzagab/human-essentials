@@ -35,8 +35,8 @@ RSpec.describe "Partners profile served area behaviour", type: :system, js: true
     end
 
     it "handles addition properly" do
-      click_on("Add another county")
-      matching = page.all(".remove_served_area") # The fields have unpredicatable numbers, so I have to count how many *soemthing* there is
+      click_on("Add Another County")
+      matching = page.all(".remove_served_area") # The fields have unpredictable numbers, so I have to count how many *something* there is
       expect(matching.size).to eq(5)
     end
 

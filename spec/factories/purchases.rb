@@ -24,7 +24,7 @@ FactoryBot.define do
     purchased_from { "Google" }
     storage_location
     organization { Organization.try(:first) || create(:organization) }
-    issued_at { nil }
+    issued_at { Time.current }
     amount_spent_in_cents { 10_00 }
     vendor { Vendor.try(:first) || create(:vendor) }
 
@@ -42,12 +42,16 @@ FactoryBot.define do
       end
 
       after(:build) do |purchase, evaluator|
-        item = evaluator.item || purchase.storage_location.inventory_items.first&.item || create(:item)
+        event_item = View::Inventory.new(purchase.organization_id)
+          .items_for_location(purchase.storage_location_id)
+          .first
+          &.db_item
+        item = evaluator.item || event_item || create(:item)
         purchase.line_items << build(:line_item, quantity: evaluator.item_quantity, item: item, itemizable: purchase)
       end
 
       after(:create) do |instance, evaluator|
-        evaluator.storage_location.increase_inventory(instance)
+        PurchaseEvent.publish(instance)
       end
     end
   end

@@ -10,7 +10,6 @@
 #  old_resource_id :bigint
 #  resource_id     :bigint
 #
-require "rails_helper"
 
 RSpec.describe Role, type: :model do
   describe "Validations" do
@@ -23,4 +22,8 @@ RSpec.describe Role, type: :model do
   end
 
   it { should accept_nested_attributes_for :users }
+
+  describe "versioning" do
+    it { is_expected.to be_versioned }
+  end
 end

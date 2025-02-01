@@ -1,6 +1,7 @@
 class KitsController < ApplicationController
   def index
-    @kits = current_organization.kits.includes(line_items: :item, inventory_items: :storage_location).class_filter(filter_params)
+    @kits = current_organization.kits.includes(line_items: :item).class_filter(filter_params)
+    @inventory = View::Inventory.new(current_organization.id)
     unless params[:include_inactive_items]
       @kits = @kits.active
     end
@@ -22,15 +23,13 @@ class KitsController < ApplicationController
       flash[:notice] = "Kit created successfully"
       redirect_to kits_path
     else
-      flash[:error] = kit_creation.errors
-                                  .full_messages
-                                  .map(&:humanize)
-                                  .join(", ")
+      flash.now[:error] = kit_creation.errors
+        .map { |error| formatted_error_message(error) }
+        .join(", ")
 
+      @kit = Kit.new(kit_params)
       load_form_collections
-
-      @kit ||= Kit.new
-      @kit.line_items.build
+      @kit.line_items.build if @kit.line_items.empty?
 
       render :new
     end
@@ -44,37 +43,34 @@ class KitsController < ApplicationController
 
   def reactivate
     @kit = Kit.find(params[:id])
-    @kit.reactivate
-    redirect_back(fallback_location: dashboard_path, notice: "Kit has been reactivated!")
+    if @kit.can_reactivate?
+      @kit.reactivate
+      redirect_back(fallback_location: dashboard_path, notice: "Kit has been reactivated!")
+    else
+      redirect_back(fallback_location: dashboard_path, alert: "Cannot reactivate kit - it has inactive items! Please reactivate the items first.")
+    end
   end
 
   def allocations
     @kit = Kit.find(params[:id])
-    @storage_locations = current_organization.storage_locations.active_locations
-    @item_inventories = @kit.item.inventory_items
+    @storage_locations = current_organization.storage_locations.active
+    @inventory = View::Inventory.new(current_organization.id)
 
     load_form_collections
   end
 
   def allocate
     @kit = Kit.find(params[:id])
-    @storage_location = current_organization.storage_locations.active_locations.find(kit_adjustment_params[:storage_location_id])
+    @storage_location = current_organization.storage_locations.active.find(kit_adjustment_params[:storage_location_id])
     @change_by = kit_adjustment_params[:change_by].to_i
-
-    if @change_by.positive?
-      service = AllocateKitInventoryService.new(kit: @kit, storage_location: @storage_location, increase_by: @change_by)
-      service.allocate
-      flash[:error] = service.error if service.error
-    elsif @change_by.negative?
-      service = DeallocateKitInventoryService.new(kit: @kit, storage_location: @storage_location, decrease_by: @change_by.abs)
-      service.deallocate
-      flash[:error] = service.error if service.error
-    end
-
-    if service.error
-      flash[:error] = service.error
-    else
-      flash[:notice] = "#{@kit.name} at #{@storage_location.name} quantity has changed by #{@change_by}"
+    begin
+      if @change_by.positive?
+        KitAllocateEvent.publish(@kit, @storage_location.id, @change_by)
+      else
+        KitDeallocateEvent.publish(@kit, @storage_location.id, -@change_by)
+      end
+    rescue => e
+      flash[:error] = e.message
     end
 
     redirect_to allocations_kit_path(id: @kit.id)
@@ -103,5 +99,13 @@ class KitsController < ApplicationController
     return {} unless params.key?(:filters)
 
     params.require(:filters).slice(:by_name)
+  end
+
+  def formatted_error_message(error)
+    if error.attribute.to_s == "inventory"
+      "Sorry, we weren't able to save the kit. Validation failed: #{error.message}"
+    else
+      error.full_message.humanize
+    end
   end
 end

@@ -23,8 +23,15 @@ function new_option(item, selected) {
   return content;
 };
 
+// Workaround to refresh item dropdown results for select2.
+function rerenderDropdown(element) {
+  const oldScrollTop = element.data('select2').$results.scrollTop();
+  element.select2('close').select2('open');
+  element.data('select2').$results.scrollTop(oldScrollTop);
+}
+
 function populate_dropdowns(objects, inventory) {
-  objects.each(function(index, element) {
+  objects.each(function(_, element) {
     const selected = Number(
       $(element)
         .find(":selected")
@@ -40,6 +47,11 @@ function populate_dropdowns(objects, inventory) {
       .remove()
       .end()
       .append(options);
+    // If this select element is currently open, the option list is
+    // now stale and needs to be refreshed.
+    if ($(element).data('select2')?.isOpen()) {
+      rerenderDropdown($(element))
+    }
   });
 }
 
@@ -66,6 +78,7 @@ $(function() {
 
   $(document).on("change", "select.storage-location-source", function() {
     const default_item = $(".line-item-fields select");
+    control = $("select.storage-location-source");
     if (storage_location_required && !control.val()) {
       $("#__add_line_item").addClass("disabled");
     }
@@ -77,13 +90,13 @@ $(function() {
   });
 
   $(document).on(
-    "cocoon:after-insert",
+    "form-input-after-insert",
     "form.storage-location-required",
     function(e) {
-      const insertedItem = $(e.detail[2]);
+      const insertedItem = $(e.detail);
       request_storage_location_and_populate_item($("select", insertedItem));
       insertedItem
-        .find("#_barcode-lookup-new_line_items")
+        .find("input.__barcode_item_lookup")
         .attr("id", `_barcode-lookup-${$(".nested-fields").length - 1}`);
       control = $("select.storage-location-source");
       $.ajax({

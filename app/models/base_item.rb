@@ -14,6 +14,7 @@
 #
 
 class BaseItem < ApplicationRecord
+  has_paper_trail
   has_many :items, dependent: :destroy, inverse_of: :base_item, foreign_key: :partner_key, primary_key: :partner_key
   has_many :barcode_items, as: :barcodeable, dependent: :destroy
 
@@ -28,4 +29,3 @@ class BaseItem < ApplicationRecord
     { partner_key: partner_key, name: name }
   end
 end
-

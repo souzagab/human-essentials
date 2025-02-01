@@ -24,6 +24,7 @@
     { "key": "pullup_23t", "name": "Kids Pull-Ups (2T-3T)", "qty": { "arbor": 0, "pdxdb": 1532 } },
     { "key": "pullup_34t", "name": "Kids Pull-Ups (3T-4T)", "qty": { "arbor": 0, "pdxdb": 787 } },
     { "key": "pullup_45t", "name": "Kids Pull-Ups (4T-5T)", "qty": { "arbor": 0, "pdxdb": 124 } },
+    { "key": "pullup_56t", "name": "Kids Pull-Ups (5T-6T)", "qty": { "arbor": 0, "pdxdb": 258 } },
     { "key": "k_sm", "name": "Kids S/M (38-65 lbs)", "qty": { "arbor": 0, "pdxdb": 264 } },
     { "key": "swimmers", "name": "Swimmers", "qty": { "arbor": 0, "pdxdb": 459 } }
   ],
@@ -40,12 +41,13 @@
   ],
   "Incontinence Pads - Adult": [
     { "key": "adult_incontinence", "name": "Adult Incontinence Pads", "qty": { "arbor": 0, "pdxdb": 2304 } },
-    { "key": "underpads", "name": "Underpads (Pack)", "qty": { "arbor": 0, "pdxdb": 2 } }
+    { "key": "underpads", "name": "Underpads (Pack)", "qty": { "arbor": 0, "pdxdb": 2 } },
+    {"key":  "ai_liners", "name":  "Liners (Incontinence)", "qty":  { "arbor": 0, "pdxdb": 1024 } }
   ],
-  "Period Supplies": [
+  "Menstrual Supplies/Items": [
     { "key": "pads", "name": "Pads", "qty": { "arbor": 0, "pdxdb": 1232 } },
     { "key": "tampons", "name": "Tampons", "qty": { "arbor": 0, "pdxdb": 5162 } },
-    { "key": "liners", "name": "Adult Liners", "qty": { "arbor": 0, "pdxdb": 5162 } }
+    { "key": "liners", "name": "Liners (Menstrual)", "qty": { "arbor": 0, "pdxdb": 5162 } }
   ],
   "Miscellaneous": [
     { "key": "bed_pad_cloth", "name": "Bed Pads (Cloth)", "qty": { "arbor": 0, "pdxdb": 44 } },

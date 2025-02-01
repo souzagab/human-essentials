@@ -1,6 +1,4 @@
-require 'rails_helper'
-
-describe KitCreateService do
+RSpec.describe KitCreateService do
   describe '#call' do
     subject { described_class.new(**args).call }
     let(:args) do
@@ -9,15 +7,17 @@ describe KitCreateService do
         kit_params: kit_params
       }
     end
-    let!(:organization_id) { FactoryBot.create(:organization).id }
+    let(:organization) { create(:organization) }
+    let!(:organization_id) { organization.id }
     let(:kit_params) do
       attrs = FactoryBot.attributes_for(:kit)
       attrs.merge!({ line_items_attributes: line_items_attr })
       attrs
     end
 
-    let(:line_items_attr) do
-      Item.first(3).map do |item|
+    let!(:line_items_attr) do
+      items = create_list(:item, 3, organization: organization)
+      items.map do |item|
         {
           item_id: item.id,
           quantity: Faker::Number.number(digits: 2)
@@ -61,12 +61,12 @@ describe KitCreateService do
         end
       end
 
-      context 'but the ItemCreationService is unsuccesful' do
-        let(:fake_error_struct) { OpenStruct.new(success?: false, error: error) }
+      context 'but the ItemCreationService is unsuccessful' do
+        let(:failing_result) { Result.new(error: error) }
         let(:error) { Faker::Name.name }
 
         before do
-          allow_any_instance_of(ItemCreateService).to receive(:call).and_return(fake_error_struct)
+          allow_any_instance_of(ItemCreateService).to receive(:call).and_return(failing_result)
         end
 
         it 'should not create the Kit' do

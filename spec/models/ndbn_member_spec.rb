@@ -7,7 +7,6 @@
 #  updated_at     :datetime         not null
 #  ndbn_member_id :bigint           not null, primary key
 #
-require "rails_helper"
 
 RSpec.describe NDBNMember, type: :model do
   describe "validations" do
@@ -24,5 +23,9 @@ RSpec.describe NDBNMember, type: :model do
     it "should equal the id and the account name" do
       expect(subject).to eq("#{ndbn_member.ndbn_member_id} - #{ndbn_member.account_name}")
     end
+  end
+
+  describe "versioning" do
+    it { is_expected.to be_versioned }
   end
 end

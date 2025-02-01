@@ -2,18 +2,21 @@ class DistributionUpdateService < DistributionService
   def initialize(old_distribution, new_distribution_params)
     @distribution = old_distribution
     @params = new_distribution_params
-    @old_line_items = old_distribution.to_a
+    @old_line_items = old_distribution.line_item_values
   end
 
   def call
     perform_distribution_service do
       @old_issued_at = distribution.issued_at
       @old_delivery_method = distribution.delivery_method
+      @params[:line_items_attributes]&.delete_if { |_, a| a[:quantity].to_i.zero? }
+
+      # remove line_items with zero quantity
 
       ItemizableUpdateService.call(
         itemizable: distribution,
         params: @params,
-        type: :decrease
+        event_class: DistributionEvent
       )
 
       @new_issued_at = distribution.issued_at
@@ -26,7 +29,7 @@ class DistributionUpdateService < DistributionService
   end
 
   def distribution_content
-    @distribution_content ||= DistributionContentChangeService.new(@old_line_items, distribution.to_a).call
+    @distribution_content ||= DistributionContentChangeService.new(@old_line_items, distribution.line_item_values).call
   end
 
   private

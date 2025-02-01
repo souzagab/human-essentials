@@ -10,7 +10,7 @@ class AuditsController < ApplicationController
   end
 
   def show
-    @inventory_items = @audit.storage_location.inventory_items
+    @items = View::Inventory.items_for_location(@audit.storage_location, include_omitted: true)
   end
 
   def edit
@@ -24,25 +24,11 @@ class AuditsController < ApplicationController
     @audit.adjustment = Adjustment.new(organization_id: @audit.organization_id, storage_location_id: @audit.storage_location_id, user_id: current_user.id, comment: 'Created Automatically through the Auditing Process')
     @audit.save
 
-    inventory_items = @audit.storage_location.inventory_items
-
-    inventory_items.each do |inventory_item|
-      line_item = @audit.line_items.find_by(item: inventory_item.item)
-
-      next if line_item.nil?
-
-      if line_item.quantity != inventory_item.quantity
-        @audit.adjustment.line_items.create(item_id: inventory_item.item.id, quantity: line_item.quantity - inventory_item.quantity)
-      end
-    end
-
-    increasing_adjustment, decreasing_adjustment = @audit.adjustment.split_difference
-    ActiveRecord::Base.transaction do
-      @audit.storage_location.increase_inventory increasing_adjustment
-      @audit.storage_location.decrease_inventory decreasing_adjustment
-    end
+    AuditEvent.publish(@audit)
     @audit.finalized!
     redirect_to audit_path(@audit), notice: "Audit is Finalized."
+  rescue => e
+    redirect_back(fallback_location: audits_path, alert: "Could not finalize audit: #{e.message}")
   end
 
   def update
@@ -50,7 +36,7 @@ class AuditsController < ApplicationController
     if @audit.update(audit_params)
       save_audit_status_and_redirect(params)
     else
-      flash[:error] = "Something didn't work quite right -- try again?"
+      flash.now[:error] = @audit.errors.full_messages.join("\n")
       @storage_locations = [@audit.storage_location]
       set_items
       @audit.line_items.build if @audit.line_items.empty?
@@ -71,14 +57,14 @@ class AuditsController < ApplicationController
     if @audit.save
       save_audit_status_and_redirect(params)
     else
-      flash[:error] = "<ul><li>" + @audit.errors.collect { |error| "#{error.attribute}: " + error.message }.join("</li><li>") + "</li></ul>"
+      handle_audit_errors
       set_storage_locations
       set_items
       @audit.line_items.build if @audit.line_items.empty?
       render :new
     end
-  rescue Errors::InsufficientAllotment => e
-    flash[:error] = e.message
+  rescue Errors::InsufficientAllotment, InventoryError => e
+    flash.now[:error] = e.message
     render :new
   end
 
@@ -90,16 +76,24 @@ class AuditsController < ApplicationController
 
   private
 
+  def handle_audit_errors
+    error_message = @audit.errors.uniq(&:attribute).map do |error|
+      attr = (error.attribute.to_s == 'base') ? '' : error.attribute.capitalize
+      "#{attr} ".tr("_", " ") + error.message
+    end
+    flash.now[:error] = error_message.join(", ")
+  end
+
   def set_audit
     @audit = current_organization.audits.find(params[:id] || params[:audit_id])
   end
 
   def set_storage_locations
-    @storage_locations = current_organization.storage_locations.active_locations
+    @storage_locations = current_organization.storage_locations.active
   end
 
   def set_items
-    @items = current_organization.items.alphabetized
+    @items = current_organization.items.where(active: true).alphabetized
   end
 
   def save_audit_status_and_redirect(params)

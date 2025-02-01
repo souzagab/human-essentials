@@ -11,24 +11,31 @@
 #  enable_child_based_requests    :boolean          default(TRUE), not null
 #  enable_individual_requests     :boolean          default(TRUE), not null
 #  enable_quantity_based_requests :boolean          default(TRUE), not null
+#  hide_package_column_on_receipt :boolean          default(FALSE)
+#  hide_value_columns_on_receipt  :boolean          default(FALSE)
 #  intake_location                :integer
 #  invitation_text                :text
 #  latitude                       :float
 #  longitude                      :float
 #  name                           :string
+#  one_step_partner_invite        :boolean          default(FALSE), not null
 #  partner_form_fields            :text             default([]), is an Array
+#  receive_email_on_requests      :boolean          default(FALSE), not null
 #  reminder_day                   :integer
 #  repackage_essentials           :boolean          default(FALSE), not null
 #  short_name                     :string
+#  signature_for_distribution_pdf :boolean          default(FALSE)
 #  state                          :string
 #  street                         :string
 #  url                            :string
+#  ytd_on_distribution_printout   :boolean          default(TRUE), not null
 #  zipcode                        :string
 #  created_at                     :datetime         not null
 #  updated_at                     :datetime         not null
 #  account_request_id             :integer
 #  ndbn_member_id                 :bigint
 #
+require 'seeds'
 
 FactoryBot.define do
   factory :organization do
@@ -54,8 +61,11 @@ FactoryBot.define do
       deadline_day { nil }
     end
 
-    after(:create) do |instance, evaluator|
-      Organization.seed_items(instance) unless evaluator.skip_items
+    trait :with_items do
+      after(:create) do |instance, evaluator|
+        Seeds.seed_base_items if BaseItem.count.zero? # seeds 45 base items if none exist
+        Organization.seed_items(instance) # creates 1 item for each base item
+      end
     end
   end
 end

@@ -17,14 +17,19 @@
 #
 
 class Vendor < ApplicationRecord
+  has_paper_trail
   include Provideable
   include Geocodable
 
   has_many :purchases, inverse_of: :vendor, dependent: :destroy
 
+  validates :business_name, presence: true
+
   scope :alphabetized, -> { order(:business_name) }
 
-  def volume
-    purchases.map { |d| d.line_items.total }.reduce(:+)
-  end
+  scope :with_volumes, -> {
+    left_joins(purchases: :line_items)
+      .select("vendors.*, SUM(COALESCE(line_items.quantity, 0)) AS volume")
+      .group(:id)
+  }
 end

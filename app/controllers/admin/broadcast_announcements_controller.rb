@@ -1,9 +1,9 @@
-class Admin::BroadcastAnnouncementsController < ApplicationController
+class Admin::BroadcastAnnouncementsController < AdminController
   before_action :set_broadcast_announcement, only: %i[edit update destroy]
   before_action :require_admin
 
   def require_admin
-    verboten! unless current_user.has_role?(Role::SUPER_ADMIN)
+    verboten! unless current_user.has_cached_role?(Role::SUPER_ADMIN)
   end
 
   def index

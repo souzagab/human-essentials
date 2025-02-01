@@ -22,17 +22,10 @@ RSpec.describe Purchase, type: :model do
   it_behaves_like "itemizable"
 
   context "Validations >" do
-    it "must belong to an organization" do
-      expect(build(:purchase, organization_id: nil)).not_to be_valid
-    end
-    it "requires an inventory (storage location)" do
-      expect(build(:purchase, storage_location_id: nil)).not_to be_valid
-    end
-    it "is invalid when the line items are invalid" do
-      d = build(:purchase)
-      d.line_items << build(:line_item, quantity: nil)
-      expect(d).not_to be_valid
-    end
+    it { should belong_to(:organization) }
+    it { should belong_to(:storage_location) }
+    it { should belong_to(:vendor) }
+
     it "is valid if categories have no values" do
       d = build(:purchase, amount_spent_in_cents: 450)
       expect(d).to be_valid
@@ -87,20 +80,13 @@ RSpec.describe Purchase, type: :model do
       p = build(:purchase, issued_at: "1999-12-31")
       expect(p).not_to be_valid
     end
+    it "ensures that the issued at is no later than 1 year" do
+      p = build(:purchase, issued_at: DateTime.now.next_year(2).to_s)
+      expect(p).not_to be_valid
+    end
   end
 
   context "Callbacks >" do
-    it "inititalizes the issued_at field to default to created_at if it wasn't explicitly set" do
-      yesterday = 1.day.ago
-      today = Time.zone.today
-
-      purchase = create(:purchase, created_at: yesterday, issued_at: today)
-      expect(purchase.issued_at.to_date).to eq(today)
-
-      purchase = create(:purchase, created_at: yesterday)
-      expect(purchase.issued_at).to eq(purchase.created_at)
-    end
-
     it "automatically combines duplicate line_item records when they're created" do
       purchase = build(:purchase)
       item = create(:item)
@@ -116,14 +102,14 @@ RSpec.describe Purchase, type: :model do
     describe "during >" do
       it "returns all purchases created between two dates" do
         Purchase.destroy_all
-        # The models should default to assigning the created_at time to the issued_at
+        # The models should default to assigning midnight to the issued_at
         create(:purchase, created_at: Time.zone.today)
         # but just for fun we'll force one in the past within the range
         create(:purchase, issued_at: Date.yesterday)
         # and one outside the range
         create(:purchase, issued_at: 1.year.ago)
 
-        expect(Purchase.during(1.month.ago..Date.tomorrow).size).to eq(2)
+        expect(Purchase.during(1.month.ago..2.days.from_now).size).to eq(2)
       end
     end
   end
@@ -163,5 +149,9 @@ RSpec.describe Purchase, type: :model do
         expect(purchase.storage_view).to eq("Smithsonian Conservation Center")
       end
     end
+  end
+
+  describe "versioning" do
+    it { is_expected.to be_versioned }
   end
 end

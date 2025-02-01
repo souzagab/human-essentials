@@ -20,13 +20,13 @@
  @import 'resources/*';
 
  // import other stylesheets after variables
-@import 'AdminLTE';
 @import 'bootstrap';
+@import 'AdminLTE';
 @import 'simple_form-bootstrap/simple_form-bootstrap';
-@import 'bootstrap-select';
 @import 'progress_stepper';
 @import 'audits';
 @import 'modal-dialog';
+@import 'expandable_table';
 @import 'custom';
 
 .modal-dialog {
@@ -151,6 +151,7 @@ body a {
 
 #copy-calendar-button {
   margin-left: 10px;
+  height: fit-content;
 }
 
 select.selectpicker + .dropdown-toggle::after {
@@ -159,4 +160,68 @@ select.selectpicker + .dropdown-toggle::after {
 
 .percentage-selector {
   width: 110px;
+}
+
+.form-yesno {
+  .radio-yesno {
+    width: 3rem;
+  }
+  .input-group {
+    text-align: center;
+  }
+  .collection_radio_buttons {
+    font-weight: normal !important;
+  }
+}
+
+.select2-container--default .select2-selection--multiple .select2-selection__choice {
+  padding-left: 28px;
+  background-color: #575b61;
+}
+
+.select2-container--default .select2-selection--multiple .select2-selection__choice__remove {
+  margin-left: 0;
+  width: 20px;
+}
+
+.select2-container--default .select2-selection--multiple .select2-selection__choice__remove:hover {
+  background-color: #8282df
+}
+
+// Fix select2 tagging search box to be inline with tags.
+// This is the default for select2 but adminLTE overwrites it.
+.select2-search.select2-search--inline {
+  display: inline-block;
+}
+
+div.low_priority_warning {
+  margin: 5px;
+  text-align: center;
+}
+
+.distribution-title {
+  display: flex;
+}
+
+legend.with-request {
+  float: none;
+  width: 80%;
+  display: inline-block;
+}
+
+div.distribution-request-unit {
+  display: inline-block;
+  flex: 1;
+  text-align: right;
+  margin-right: 20px;
+  font-size: 1.5em;
+}
+
+.li-requested {
+  font-size: 1.5em;
+  width: 100px;
+  min-width: 100px;
+  text-align: right;
+  margin-right: 20px;
+  white-space: nowrap;
 }

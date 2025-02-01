@@ -2,11 +2,9 @@
     "uninvited": 'ban',
     "invited": 'envelope',
     "awaiting_review": 'question-circle',
-    "approved": 'check-circle',
-    "error": 'exclamation-circle'
+    "approved": 'check-circle'
   }.with_indifferent_access
-  current_filtered_status = params.dig(:filters, :by_status)
-%>
+  current_filtered_status = params.dig(:filters, :by_status) %>
 
 <ul id="partner-status">
   <% partners.statuses.each do |status, _|
@@ -14,7 +12,7 @@
     partner_count = partners.select(&selector).size %>
   <li>
     <%= fa_icon icon_mapping[status] || '', class: "bg-partner-#{status}  " %>
-    <%= link_to_unless partner_count.zero?, "#{partner_count} #{status.humanize}", partners_path(filters: { by_status: status }), class: ("filtering" if status == current_filtered_status) %>
+    <%= link_to_unless partner_count.zero?, "#{partner_count} #{status.humanize}", partners_path(organization_name:nil, filters: { by_status: status }), class: ("filtering" if status == current_filtered_status) %>
   </li>
   <% end %>
   <li>
