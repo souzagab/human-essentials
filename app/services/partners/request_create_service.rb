@@ -4,32 +4,17 @@ module Partners
 
     attr_reader :partner_request
 
-    def initialize(partner_user_id:, comments: nil, for_families: false, item_requests_attributes: [], additional_attrs: {})
-      @partner_user_id = partner_user_id
+    def initialize(request_type:, partner_id:, user_id:, comments: nil, item_requests_attributes: [], additional_attrs: {})
+      @partner_id = partner_id
+      @user_id = user_id
       @comments = comments
-      @for_families = for_families
+      @request_type = request_type
       @item_requests_attributes = item_requests_attributes
       @additional_attrs = additional_attrs
     end
 
     def call
-      @partner_request = ::Request.new(partner_id: partner.id,
-        organization_id: organization_id,
-        comments: comments,
-        partner_user_id: partner_user_id)
-      @partner_request = populate_item_request(@partner_request)
-      @partner_request.assign_attributes(additional_attrs)
-
-      unless @partner_request.valid?
-        @partner_request.errors.each do |error|
-          errors.add(error.attribute, error.message)
-        end
-      end
-
-      if @partner_request.comments.blank? && @partner_request.item_requests.blank?
-        errors.add(:base, 'completely empty request')
-      end
-
+      initialize_only
       return self if errors.present?
 
       Request.transaction do
@@ -44,9 +29,29 @@ module Partners
       self
     end
 
+    def initialize_only
+      @partner_request = ::Request.new(
+        partner_id: partner.id,
+        organization_id: organization_id,
+        comments: comments,
+        request_type: request_type,
+        partner_user_id: user_id
+      )
+      @partner_request = populate_item_request(partner_request)
+      @partner_request.assign_attributes(additional_attrs)
+
+      unless @partner_request.valid?
+        @partner_request.errors.each do |error|
+          errors.add(error.attribute, error.message)
+        end
+      end
+
+      self
+    end
+
     private
 
-    attr_reader :partner_user_id, :comments, :item_requests_attributes, :additional_attrs
+    attr_reader :user_id, :partner_id, :comments, :item_requests_attributes, :additional_attrs, :request_type
 
     def populate_item_request(partner_request)
       # Exclude any line item that is completely empty
@@ -54,24 +59,52 @@ module Partners
         attrs['item_id'].blank? && attrs['quantity'].blank?
       end
 
-      item_requests = formatted_line_items.map do |ira|
-        Partners::ItemRequest.new(
-          item_id: ira['item_id'],
-          quantity: ira['quantity'],
-          children: ira['children'] || [], # will create ChildItemRequests if there are any
-          name: fetch_organization_item_name(ira['item_id']),
-          partner_key: fetch_organization_partner_key(ira['item_id'])
-        )
-      end
+      items = {}
 
-      partner_request.item_requests << item_requests
+      formatted_line_items.each do |input_item|
+        pre_existing_entry = items[input_item['item_id']]
+
+        if pre_existing_entry
+          if pre_existing_entry.request_unit != input_item['request_unit']
+            errors.add(:base, "Please use the same unit for every #{Item.find(input_item["item_id"]).name}")
+          else
+            pre_existing_entry.quantity = (pre_existing_entry.quantity.to_i + input_item['quantity'].to_i).to_s
+            # NOTE: When this code was written (and maybe it's still the
+            # case as you read it!), the FamilyRequestsController does a
+            # ton of calculation to translate children to item quantities.
+            # If that logic is incorrect, there's not much we can do here
+            # to fix things. Could make sense to move more of that logic
+            # into one of the service objects that instantiate the Request
+            # object (either this one or the FamilyRequestCreateService).
+            pre_existing_entry.children = (pre_existing_entry.children + (input_item['children'] || [])).uniq
+            next
+          end
+        end
+
+        if input_item['request_unit'].to_s == '-1' # nothing selected
+          errors.add(:base, "Please select a unit for #{Item.find(input_item["item_id"]).name}")
+        end
+
+        item_request = Partners::ItemRequest.new(
+          item_id: input_item['item_id'],
+          request_unit: input_item['request_unit'],
+          quantity: input_item['quantity'],
+          children: input_item['children'] || [], # will create ChildItemRequests if there are any
+          name: fetch_organization_item_name(input_item['item_id']),
+          partner_key: fetch_organization_partner_key(input_item['item_id'])
+        )
+        partner_request.item_requests << item_request
+        items[input_item['item_id']] = item_request
+      end
 
       partner_request.request_items = partner_request.item_requests.map do |ir|
         {
           item_id: ir.item_id,
-          quantity: ir.quantity
-        }
+          quantity: ir.quantity,
+          request_unit: ir.request_unit
+        }.compact
       end
+
       partner_request
     end
 
@@ -98,7 +131,7 @@ module Partners
     end
 
     def partner
-      @partner ||= ::User.find(partner_user_id).partner
+      @partner ||= Partner.find(partner_id)
     end
   end
 end

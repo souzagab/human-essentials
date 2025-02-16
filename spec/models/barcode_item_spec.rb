@@ -41,6 +41,8 @@ RSpec.shared_examples "common barcode tests" do |barcode_item_factory|
 end
 
 RSpec.describe BarcodeItem, type: :model do
+  let(:organization) { create(:organization) }
+
   context "Barcodes of BaseItems ('Global')" do
     let(:base_item) { create(:base_item) }
     let(:global_barcode_item) { create(:global_barcode_item, barcodeable: base_item) }
@@ -80,7 +82,6 @@ RSpec.describe BarcodeItem, type: :model do
       describe "by_item_partner_key" # TODO: Write test
       describe "by_base_item_partner_key" # TODO: Write test
       describe "by_value" # TODO: Write test
-      describe "for_csv_export" # TODO: Write test
       describe "global" do
         it "includes all barcodes, for both base items and regular items" do
           create(:global_barcode_item)
@@ -94,8 +95,7 @@ RSpec.describe BarcodeItem, type: :model do
     context "validations >" do
       it "is valid with or without an organization" do
         expect(build(:global_barcode_item, organization: nil)).to be_valid
-        org = Organization.try(:first) || create(:organization)
-        expect(build(:global_barcode_item, organization: org)).to be_valid
+        expect(build(:global_barcode_item, organization: organization)).to be_valid
       end
 
       it "enforces uniqueness in the global scope" do
@@ -104,7 +104,7 @@ RSpec.describe BarcodeItem, type: :model do
       end
 
       it "allows multiple barcodes to point at the same base item" do
-        base_item = BaseItem.first
+        base_item = create(:base_item)
         create(:global_barcode_item, barcodeable: base_item)
         expect(build(:global_barcode_item, barcodeable: base_item)).to be_valid
       end
@@ -114,7 +114,7 @@ RSpec.describe BarcodeItem, type: :model do
   end
 
   context "Organization barcodes" do
-    let(:item) { create(:item) }
+    let(:item) { create(:item, name: "First Item") }
     let(:barcode_item) { create(:barcode_item, barcodeable: item) }
 
     it "updates a counter in Item whenever it tracks a new barcode" do
@@ -132,16 +132,10 @@ RSpec.describe BarcodeItem, type: :model do
     end
 
     context "scopes >" do
-      it "->for_csv_export will accept an organization and provide all barcodes for that org" do
-        barcode_item
-        create(:barcode_item, organization: create(:organization))
-        results = BarcodeItem.for_csv_export(barcode_item.organization)
-        expect(results).to eq([barcode_item])
-      end
-
       it "#by_item_partner_key returns barcodes that match the partner key" do
-        i1 = create(:item, base_item: BaseItem.first)
-        i2 = create(:item, base_item: BaseItem.last)
+        bases = create_list(:base_item, 2)
+        i1 = create(:item, name: "Item 1", base_item: bases.first)
+        i2 = create(:item,  name: "Item 2", base_item: bases.last)
         b1 = create(:barcode_item, barcodeable: i1)
         create(:barcode_item, barcodeable: i2)
         expect(BarcodeItem.by_item_partner_key(i1.partner_key).first).to eq(b1)
@@ -156,11 +150,11 @@ RSpec.describe BarcodeItem, type: :model do
 
     context "when searching for a barcode where there is a global and local with the same value" do
       let!(:base_item) { create(:base_item, partner_key: "foo", name: "base item") }
-      let!(:item) { create(:item, partner_key: "foo", name: "custom item", organization: @organization) }
-      let!(:other_item) { create(:item, partner_key: "foo", name: "other item", organization: create(:organization, skip_items: true)) }
+      let!(:item) { create(:item, partner_key: "foo", name: "custom item", organization: organization) }
+      let!(:other_item) { create(:item, partner_key: "foo", name: "other item", organization: create(:organization)) }
 
       let!(:global) { create(:global_barcode_item, value: "DEADBEEF", barcodeable: base_item) }
-      let!(:local) { create(:barcode_item, value: "DEADBEEF", barcodeable: item, organization: @organization) }
+      let!(:local) { create(:barcode_item, value: "DEADBEEF", barcodeable: item, organization: organization) }
       let!(:other_local) { create(:barcode_item, value: "DEADBEEF", barcodeable: other_item, organization: other_item.organization) }
 
       it "favors the local barcode" do
@@ -170,31 +164,27 @@ RSpec.describe BarcodeItem, type: :model do
     end
 
     context "validations >" do
-      it "is valid only with an organization" do
-        expect(build(:barcode_item, organization: nil)).not_to be_valid
-        org = Organization.try(:first) || create(:organization)
-        expect(build(:barcode_item, organization: org)).to be_valid
-      end
+      it { should validate_presence_of(:organization) }
 
       it "does not enforces value uniqueness across organizations" do
-        barcode = create(:barcode_item, value: "DEADBEEF", organization: @organization)
-        expect(build(:barcode_item, value: barcode.value, organization: create(:organization, skip_items: true))).to be_valid
+        barcode = create(:barcode_item, value: "DEADBEEF", organization: organization)
+        expect(build(:barcode_item, value: barcode.value, organization: create(:organization))).to be_valid
       end
 
       it "enforces value uniqueness within the organization" do
-        barcode = create(:barcode_item, value: "DEADBEEF", organization: @organization)
-        expect(build(:barcode_item, value: barcode.value, organization: @organization)).not_to be_valid
+        barcode = create(:barcode_item, value: "DEADBEEF", organization: organization)
+        expect(build(:barcode_item, value: barcode.value, organization: organization)).not_to be_valid
       end
 
       it "does not enforce value uniqueness compared with the global scope" do
         barcode = create(:global_barcode_item, value: "DEADBEEF")
-        expect(build(:barcode_item, value: barcode.value, organization: @organization)).to be_valid
+        expect(build(:barcode_item, value: barcode.value, organization: organization)).to be_valid
       end
 
       it "allows multiple barcodes to point at the same item" do
-        item = create(:item, organization: @organization)
-        create(:barcode_item, organization: @organization, barcodeable: item)
-        expect(build(:barcode_item, organization: @organization, barcodeable: item)).to be_valid
+        item = create(:item, organization: organization)
+        create(:barcode_item, organization: organization, barcodeable: item)
+        expect(build(:barcode_item, organization: organization, barcodeable: item)).to be_valid
       end
 
       include_examples "common barcode tests", :barcode_item
@@ -205,5 +195,9 @@ RSpec.describe BarcodeItem, type: :model do
         expect(barcode_item.to_h).to eq(barcodeable_id: barcode_item.barcodeable_id, barcodeable_type: barcode_item.barcodeable_type, quantity: barcode_item.quantity)
       end
     end
+  end
+
+  describe "versioning" do
+    it { is_expected.to be_versioned }
   end
 end

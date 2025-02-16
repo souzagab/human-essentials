@@ -14,16 +14,23 @@ class ApplicationController < ActionController::Base
 
   rescue_from ActiveRecord::RecordNotFound, with: :not_found!
 
+  rescue_from ActionController::InvalidAuthenticityToken do
+    flash[:error] = "Your session expired. This could be due to leaving a page open for a long time, or having multiple tabs open. Try resubmitting."
+    redirect_back fallback_location: root_path
+  end
+
   def current_organization
     return @current_organization if @current_organization
+    return nil unless current_role
 
-    return current_role.resource if current_role.resource.is_a?(Organization)
+    return current_role.resource if current_role&.resource&.is_a?(Organization)
 
-    Organization.find_by(short_name: params[:organization_id])
+    Organization.find_by(short_name: params[:organization_name])
   end
   helper_method :current_organization
 
   def current_partner
+    return nil unless current_role
     return nil if current_role.name.to_sym != Role::PARTNER
 
     current_role.resource
@@ -32,67 +39,46 @@ class ApplicationController < ActionController::Base
 
   def current_role
     return @role if @role
+    return nil unless current_user
 
     @role = Role.find_by(id: session[:current_role]) || UsersRole.current_role_for(current_user)
-    session[:current_role] = @role&.id
 
     @role
   end
 
-  def organization_url_options(options = {})
-    options.merge(organization_id: current_organization.to_param)
-  end
-  helper_method :organization_url_options
-
-  # override Rails' default_url_options to ensure organization_id is added to
-  # each URL generated
-  def default_url_options(options = {})
-    # Early return if the request is not authenticated and no
-    # current_user is defined
-    return options if current_user.blank?
-
-    if current_organization.present? && !options.key?(:organization_id)
-      options[:organization_id] = current_organization.to_param
-    elsif current_role.name == Role::ORG_ADMIN.to_s
-      options[:organization_id] = current_user.organization.to_param
-    elsif current_role.name == Role::SUPER_ADMIN.to_s
-      # FIXME: This *might* not be the best way to approach this...
-      options[:organization_id] = "admin"
-    end
-    options
-  end
-
   def dashboard_path_from_current_role
+    return root_path if current_role.blank?
+
     if current_role.name == Role::SUPER_ADMIN.to_s
       admin_dashboard_path
     elsif current_role.name == Role::PARTNER.to_s
       partners_dashboard_path
     elsif current_user.organization
-      dashboard_path(current_user.organization)
+      dashboard_path
     else
-      root_path
+      "/403"
     end
   end
+  helper_method :dashboard_path_from_current_role
 
   def authorize_user
     return unless params[:controller] # part of omniauth controller flow
     verboten! unless params[:controller].include?("devise") ||
-      current_user.has_role?(Role::SUPER_ADMIN) ||
-      current_user.has_role?(Role::ORG_USER, current_organization) ||
-      current_user.has_role?(Role::ORG_ADMIN, current_organization) ||
-      current_user.has_role?(Role::PARTNER, current_partner)
+      current_user.has_cached_role?(Role::SUPER_ADMIN) ||
+      current_user.has_cached_role?(Role::ORG_USER, current_organization) ||
+      current_user.has_cached_role?(Role::ORG_ADMIN, current_organization) ||
+      current_user.has_cached_role?(Role::PARTNER, current_partner)
   end
 
   def authorize_admin
-    verboten! unless current_user.has_role?(Role::SUPER_ADMIN) ||
-      current_user.has_role?(Role::ORG_ADMIN, current_organization)
+    verboten! unless current_user.has_cached_role?(Role::SUPER_ADMIN) ||
+      current_user.has_cached_role?(Role::ORG_ADMIN, current_organization)
   end
 
   def log_active_user
     if current_user && should_update_last_request_at?
       # we don't want the user record to validate or run callbacks when we're tracking activity
       current_user.update_columns(last_request_at: Time.now.utc)
-
     end
   end
 
@@ -117,7 +103,7 @@ class ApplicationController < ActionController::Base
 
   def verboten!
     respond_to do |format|
-      format.html { redirect_to dashboard_path, flash: { error: "Access Denied." } }
+      format.html { redirect_to dashboard_path_from_current_role, flash: { error: "Access Denied." } }
       format.json { render body: nil, status: :forbidden }
     end
   end

@@ -43,42 +43,63 @@ class DistributionsController < ApplicationController
 
     @distributions = current_organization
                      .distributions
-                     .includes(:partner, :storage_location, line_items: [:item])
-                     .order('issued_at DESC')
-                     .apply_filters(filter_params, helpers.selected_range)
+                     .order(issued_at: :desc)
+                     .includes(:partner, :storage_location)
+                     .class_filter(scope_filters)
     @paginated_distributions = @distributions.page(params[:page])
-    @total_value_all_distributions = total_value(@distributions)
-    @total_value_paginated_distributions = total_value(@paginated_distributions)
-    @total_items_all_distributions = total_items(@distributions)
-    @total_items_paginated_distributions = total_items(@paginated_distributions)
-    @items = current_organization.items.alphabetized
-    @item_categories = current_organization.item_categories
-    @storage_locations = current_organization.storage_locations.active_locations.alphabetized
-    @partners = @distributions.collect(&:partner).uniq.sort_by(&:name)
-    @selected_item = filter_params[:by_item_id]
+    @items = current_organization.items.alphabetized.select(:id, :name)
+    @item_categories = current_organization.item_categories.select(:id, :name)
+    @storage_locations = current_organization.storage_locations.active.alphabetized.select(:id, :name)
+    @partners = current_organization.partners.active.alphabetized.select(:id, :name)
+    @selected_item = filter_params[:by_item_id].presence
+    @distribution_totals = DistributionTotalsService.new(current_organization.distributions, scope_filters)
+    @total_value_all_distributions = @distribution_totals.total_value
+    @total_items_all_distributions = @distribution_totals.total_quantity
+    paginated_ids = @paginated_distributions.ids
+    @total_value_paginated_distributions = @distribution_totals.total_value(paginated_ids)
+    @total_items_paginated_distributions = @distribution_totals.total_quantity(paginated_ids)
     @selected_item_category = filter_params[:by_item_category_id]
     @selected_partner = filter_params[:by_partner]
     @selected_status = filter_params[:by_state]
     @selected_location = filter_params[:by_location]
     # FIXME: one of these needs to be removed but it's unclear which at this point
     @statuses = Distribution.states.transform_keys(&:humanize)
+    @distributions_with_inactive_items = @distributions.joins(:inactive_items).pluck(:id)
 
     respond_to do |format|
       format.html
       format.csv do
-        send_data Exports::ExportDistributionsCSVService.new(distributions: @distributions, filters: filter_params).generate_csv, filename: "Distributions-#{Time.zone.today}.csv"
+        send_data Exports::ExportDistributionsCSVService.new(distributions: @distributions.includes(line_items: :item), organization: current_organization, filters: scope_filters).generate_csv, filename: "Distributions-#{Time.zone.today}.csv"
       end
     end
   end
 
+  # This endpoint is in support of displaying a confirmation modal before a distribution is created.
+  # Since the modal should only be shown for a valid distribution, client side JS will invoke this
+  # endpoint, and if the distribution is valid, this endpoint also returns the HTML for the modal content.
+  # Important: The distribution model is intentionally NOT saved to the database at this point because
+  # the user has not yet confirmed that they want to create it.
+  def validate
+    @dist = Distribution.new(distribution_params.merge(organization: current_organization))
+    @dist.line_items.combine!
+    if @dist.valid?
+      body = render_to_string(template: 'distributions/validate', formats: [:html], layout: false)
+      render json: {valid: true, body: body}
+    else
+      render json: {valid: false}
+    end
+  end
+
   def create
-    result = DistributionCreateService.new(distribution_params.merge(organization: current_organization), request_id).call
+    dist = Distribution.new(distribution_params.merge(organization: current_organization))
+    result = DistributionCreateService.new(dist, request_id).call
 
     if result.success?
       session[:created_distribution_id] = result.distribution.id
       @distribution = result.distribution
 
       perform_inventory_check
+      schedule_reminder_email(result.distribution) if @distribution.reminder_email_enabled
 
       respond_to do |format|
         format.turbo_stream do
@@ -92,9 +113,23 @@ class DistributionsController < ApplicationController
         # does not match any known Request
         @distribution.request = Request.find(request_id)
       end
-      @distribution.line_items.build if @distribution.line_items.size.zero?
-      @items = current_organization.items.alphabetized
-      @storage_locations = current_organization.storage_locations.active_locations.alphabetized
+      if @distribution.line_items.size.zero?
+        @distribution.line_items.build
+      elsif request_id
+        @distribution.initialize_request_items
+      end
+      @items = current_organization.items.active.alphabetized
+      @partner_list = current_organization.partners.where.not(status: 'deactivated').alphabetized
+
+      inventory = View::Inventory.new(@distribution.organization_id)
+      @storage_locations = current_organization.storage_locations.active.alphabetized.select do |storage_loc|
+        inventory.quantity_for(storage_location: storage_loc.id).positive?
+      end
+      if @distribution.storage_location.present?
+        @item_labels_with_quantities = inventory
+          .items_for_location(@distribution.storage_location.id, include_omitted: true)
+          .map(&:to_dropdown_option)
+      end
 
       flash_error = insufficient_error_message(result.error.message)
 
@@ -102,7 +137,7 @@ class DistributionsController < ApplicationController
         format.turbo_stream do
           flash.now[:error] = flash_error
           render turbo_stream: [
-            turbo_stream.replace(@distribution, partial: "form", locals: {distribution: @distribution}),
+            turbo_stream.replace(@distribution, partial: "form", locals: {distribution: @distribution, date_place_holder: @distribution.issued_at}),
             turbo_stream.replace("flash", partial: "shared/flash")
           ], status: :bad_request
         end
@@ -118,8 +153,13 @@ class DistributionsController < ApplicationController
       @distribution.line_items.build
       @distribution.copy_from_donation(params[:donation_id], params[:storage_location_id])
     end
-    @items = current_organization.items.alphabetized
-    @storage_locations = current_organization.storage_locations.active_locations.has_inventory_items.alphabetized
+    @items = current_organization.items.active.alphabetized
+    @partner_list = current_organization.partners.where.not(status: 'deactivated').alphabetized
+
+    inventory = View::Inventory.new(current_organization.id)
+    @storage_locations = current_organization.storage_locations.active.alphabetized.select do |storage_loc|
+      inventory.quantity_for(storage_location: storage_loc.id).positive?
+    end
   end
 
   def show
@@ -135,11 +175,19 @@ class DistributionsController < ApplicationController
 
   def edit
     @distribution = Distribution.includes(:line_items).includes(:storage_location).find(params[:id])
+    @distribution.initialize_request_items
     if (!@distribution.complete? && @distribution.future?) ||
-        current_user.has_role?(Role::ORG_ADMIN, current_organization)
+        current_user.has_cached_role?(Role::ORG_ADMIN, current_organization)
       @distribution.line_items.build if @distribution.line_items.size.zero?
-      @items = current_organization.items.alphabetized
-      @storage_locations = current_organization.storage_locations.active_locations.has_inventory_items.alphabetized
+      @items = current_organization.items.active.alphabetized
+      @partner_list = current_organization.partners.alphabetized
+      @audit_warning = current_organization.audits
+        .where(storage_location_id: @distribution.storage_location_id)
+        .where("updated_at > ?", @distribution.created_at).any?
+      inventory = View::Inventory.new(@distribution.organization_id)
+      @storage_locations = current_organization.storage_locations.active.alphabetized.select do |storage_loc|
+        !inventory.quantity_for(storage_location: storage_loc.id).negative?
+      end
     else
       redirect_to distributions_path, error: 'To edit a distribution,
       you must be an organization admin or the current date must be later than today.'
@@ -154,15 +202,17 @@ class DistributionsController < ApplicationController
       if result.resend_notification? && @distribution.partner&.send_reminders
         send_notification(current_organization.id, @distribution.id, subject: "Your Distribution Has Changed", distribution_changes: result.distribution_content.changes)
       end
-      schedule_reminder_email(@distribution)
+      schedule_reminder_email(@distribution) if @distribution.reminder_email_enabled
 
       perform_inventory_check
       redirect_to @distribution, notice: "Distribution updated!"
     else
-      flash[:error] = insufficient_error_message(result.error.message)
+      flash.now[:error] = insufficient_error_message(result.error.message)
       @distribution.line_items.build if @distribution.line_items.size.zero?
-      @items = current_organization.items.alphabetized
-      @storage_locations = current_organization.storage_locations.active_locations.alphabetized
+      @distribution.initialize_request_items
+      @items = current_organization.items.active.alphabetized
+      @partner_list = current_organization.partners.alphabetized
+      @storage_locations = current_organization.storage_locations.active.alphabetized
       render :edit
     end
   end
@@ -184,7 +234,14 @@ class DistributionsController < ApplicationController
 
   # TODO: This needs a little more context. Is it JSON only? HTML?
   def schedule
-    @pick_ups = current_organization.distributions
+    respond_to do |format|
+      format.html
+      format.json do
+        start_at = params[:start].to_datetime
+        end_at = params[:end].to_datetime
+        @pick_ups = current_organization.distributions.includes(:partner).where(issued_at: start_at..end_at)
+      end
+    end
   end
 
   def calendar
@@ -238,14 +295,6 @@ class DistributionsController < ApplicationController
     params.dig(:distribution, :request_attributes, :id)
   end
 
-  def total_items(distributions)
-    LineItem.where(itemizable_type: "Distribution", itemizable_id: distributions.pluck(:id)).sum('quantity')
-  end
-
-  def total_value(distributions)
-    distributions.sum(&:value_per_itemizable)
-  end
-
   def daily_items(pick_ups)
     item_groups = LineItem.where(itemizable_type: "Distribution", itemizable_id: pick_ups.pluck(:id)).group_by(&:item_id)
     item_groups.map do |_id, items|
@@ -257,21 +306,26 @@ class DistributionsController < ApplicationController
     end
   end
 
+  def scope_filters
+    filter_params
+      .except(:date_range)
+      .merge(during: helpers.selected_range)
+  end
+
   helper_method \
     def filter_params
     return {} unless params.key?(:filters)
 
-    params.require(:filters).permit(:by_item_id, :by_item_category_id, :by_partner, :by_state, :by_location)
+    params
+      .require(:filters)
+      .permit(:by_item_id, :by_item_category_id, :by_partner, :by_state, :by_location, :date_range)
   end
 
   def perform_inventory_check
     inventory_check_result = InventoryCheckService.new(@distribution).call
 
-    if inventory_check_result.error.present?
-      flash[:error] = inventory_check_result.error
-    end
-    if inventory_check_result.alert.present?
-      flash[:alert] = inventory_check_result.alert
-    end
+    alerts = [inventory_check_result.minimum_alert, inventory_check_result.recommended_alert]
+    merged_alert = alerts.compact.join("\n")
+    flash[:alert] = merged_alert if merged_alert.present?
   end
 end

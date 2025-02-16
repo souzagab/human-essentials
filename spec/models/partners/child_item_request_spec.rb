@@ -12,7 +12,6 @@
 #  child_id                    :bigint
 #  item_request_id             :bigint
 #
-require 'rails_helper'
 
 RSpec.describe Partners::ChildItemRequest, type: :model do
   describe 'associations' do
@@ -47,5 +46,9 @@ RSpec.describe Partners::ChildItemRequest, type: :model do
     it 'should return the item_id on the item_request' do
       expect(subject).to eq(item_id)
     end
+  end
+
+  describe "versioning" do
+    it { is_expected.to be_versioned }
   end
 end

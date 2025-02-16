@@ -1,13 +1,16 @@
 RSpec.describe "Question search", type: :system, js: true do
+  let(:organization) { create(:organization) }
+  let(:user) { create(:user, organization: organization) }
+
   context "while logged in" do
     before do
-      sign_in(@user)
+      sign_in(user)
     end
 
     it "filters by question title" do
-      question_1 = FactoryBot.create(:question, title: "first", for_banks: true)
-      question_2 = FactoryBot.create(:question, title: "second", for_banks: true)
-      question_3 = FactoryBot.create(:question, title: "third", for_banks: true)
+      question_1 = FactoryBot.create(:question, title: "first")
+      question_2 = FactoryBot.create(:question, title: "second")
+      question_3 = FactoryBot.create(:question, title: "third")
 
       visit help_path
 

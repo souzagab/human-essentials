@@ -18,19 +18,22 @@ class DistributionItemizedBreakdownService
   #
   # @return [Array]
   def fetch
+    inventory = View::Inventory.new(@organization.id)
+    current_onhand = current_onhand_quantities(inventory)
+    current_min_onhand = current_onhand_minimums(inventory)
     items_distributed = fetch_items_distributed
 
     # Inject the "onhand" data
     items_distributed.map! do |item|
       item_name = item[:name]
 
-      below_onhand_minimum = if current_onhand_quantities[item_name] && current_onhand_minimums[item_name]
-        current_onhand_quantities[item_name] < current_onhand_minimums[item_name]
+      below_onhand_minimum = if current_onhand[item_name] && current_min_onhand[item_name]
+        current_onhand[item_name] < current_min_onhand[item_name]
       end
 
       item.merge({
-        current_onhand: current_onhand_quantities[item_name],
-        onhand_minimum: current_onhand_minimums[item_name],
+        current_onhand: current_onhand[item_name],
+        onhand_minimum: current_min_onhand[item_name],
         below_onhand_minimum: below_onhand_minimum
       })
     end
@@ -55,12 +58,12 @@ class DistributionItemizedBreakdownService
     @distributions ||= organization.distributions.where(id: distribution_ids).includes(line_items: :item)
   end
 
-  def current_onhand_quantities
-    @current_onhand_quantities ||= organization.inventory_items.group("items.name").sum(:quantity)
+  def current_onhand_quantities(inventory)
+    inventory.all_items.group_by(&:name).to_h { |k, v| [k, v.sum(&:quantity)] }
   end
 
-  def current_onhand_minimums
-    @current_onhand_minimums ||= organization.inventory_items.group("items.name").maximum("items.on_hand_minimum_quantity")
+  def current_onhand_minimums(inventory)
+    inventory.all_items.group_by(&:name).to_h { |k, v| [k, v.map(&:on_hand_minimum_quantity).max] }
   end
 
   def fetch_items_distributed

@@ -1,6 +1,4 @@
-require 'rails_helper'
-
-describe DistributionDestroyService do
+RSpec.describe DistributionDestroyService do
   describe '#call' do
     subject { described_class.new(distribution_id).call }
     let(:distribution_id) { Faker::Number.number }
@@ -29,15 +27,26 @@ describe DistributionDestroyService do
           .and_return(distribution)
       end
 
-      context 'and the operations suceed' do
+      context 'and the operations succeed' do
         let(:fake_storage_location) { instance_double(StorageLocation) }
+        let(:fake_items) do
+          [
+            {
+              item_id: Faker::Number.number,
+              item: Faker::Lorem.word,
+              quantity_on_hand: Faker::Number.number,
+              quantity_requested: Faker::Number.number
+            }
+          ]
+        end
         before do
           allow(distribution).to receive(:storage_location).and_return(fake_storage_location)
-          allow(fake_storage_location).to receive(:increase_inventory)
+          allow(distribution).to receive(:line_item_values).and_return(fake_items)
         end
 
         it 'should destroy the Distribution' do
           expect { subject }.to change { Distribution.count }.by(-1)
+            .and change { DistributionDestroyEvent.count }.by(1)
         end
 
         it 'should be successful' do
@@ -47,7 +56,6 @@ describe DistributionDestroyService do
 
         it 'should increase the inventory of the storage location' do
           subject
-          expect(fake_storage_location).to have_received(:increase_inventory).with(distribution)
         end
       end
 
@@ -73,30 +81,8 @@ describe DistributionDestroyService do
       end
 
       context 'and the increase inventory operations fails' do
-        let(:fake_storage_location) { instance_double(StorageLocation) }
-        let(:fake_insufficient_allotment_error) do
-          Errors::InsufficientAllotment.new(
-            fake_error_message,
-            fake_insufficient_items
-          )
-        end
-        let(:fake_error_message) { Faker::Lorem.sentence }
-        let(:fake_insufficient_items) do
-          [
-            {
-              item_id: Faker::Number.number,
-              item: Faker::Lorem.word,
-              quantity_on_hand: Faker::Number.number,
-              quantity_requested: Faker::Number.number
-            }
-          ]
-        end
-
         before do
-          allow(distribution).to receive(:storage_location).and_return(fake_storage_location)
-          allow(fake_storage_location).to receive(:increase_inventory)
-            .with(distribution)
-            .and_raise(fake_insufficient_allotment_error)
+          allow(DistributionDestroyEvent).to receive(:publish).and_raise('OH NOES')
         end
 
         it 'should not delete the Distribution' do
@@ -106,7 +92,7 @@ describe DistributionDestroyService do
         it 'should not be successful and have the error message' do
           result = subject
           expect(result).not_to be_success
-          expect(result.error).to be_instance_of(Errors::InsufficientAllotment)
+          expect(result.error.message).to eq('OH NOES')
         end
       end
     end

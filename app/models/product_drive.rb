@@ -13,10 +13,16 @@
 #
 
 class ProductDrive < ApplicationRecord
+  has_paper_trail
   belongs_to :organization, optional: true
   include Filterable
+  include Taggable
 
   scope :by_name, ->(name_filter) { where(name: name_filter) }
+  scope :by_item_category_id, ->(item_category_id) {
+    joins(donations: {line_items: :item})
+      .where(item: { item_category_id: item_category_id })
+  }
 
   scope :within_date_range, ->(search_range) {
     search_dates = search_date_range(search_range)
@@ -26,6 +32,7 @@ class ProductDrive < ApplicationRecord
   }
 
   has_many :donations, dependent: :nullify
+  has_many :product_drive_participants, -> { distinct }, through: :donations
   validates :name, presence:
     { message: "A name must be chosen." }
   validates :start_date, presence:
@@ -38,7 +45,7 @@ class ProductDrive < ApplicationRecord
     return if start_date.nil? || end_date.nil?
 
     if end_date < start_date
-      errors.add(:end_date, 'End date must be after the start date')
+      errors.add(:end_date, 'must be after the start date')
     end
   end
 
@@ -63,6 +70,10 @@ class ProductDrive < ApplicationRecord
     @search_date_range = { start_date: dates[0], end_date: dates[1] }
   end
 
+  # quantities are FILTERED by date then SORTED by name
+  #
+  # @param date_range [Range]
+  # @return [Array<Integer>]
   def item_quantities_by_name_and_date(date_range)
     quantities = donations.joins(:line_items)
       .during(date_range)
@@ -74,15 +85,23 @@ class ProductDrive < ApplicationRecord
     end
   end
 
-  def donation_quantity_by_date(date_range)
-    donations.joins(:line_items)
-      .during(date_range)
-      .sum('line_items.quantity')
+  def donation_quantity_by_date(date_range, item_category_id = nil)
+    query = donations.during(date_range)
+    query = if item_category_id.present?
+      query.joins(line_items: :item).where(item: {item_category_id: item_category_id})
+    else
+      query.joins(:line_items)
+    end
+    query.sum('line_items.quantity')
   end
 
-  def distinct_items_count_by_date(date_range)
-    donations.joins(:line_items)
-      .during(date_range)
-      .select('line_items.item_id').distinct.count
+  def distinct_items_count_by_date(date_range, item_category_id = nil)
+    query = donations.during(date_range)
+    query = if item_category_id.present?
+      query.joins(line_items: :item).where(item: {item_category_id: item_category_id})
+    else
+      query.joins(:line_items)
+    end
+    query.select('line_items.item_id').distinct.count
   end
 end

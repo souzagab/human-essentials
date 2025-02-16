@@ -38,9 +38,6 @@
             </div>
           </div>
 
-
-
-
           <div class="card-body table-responsive p-0">
             <table class="table table-hover">
               <thead>
@@ -54,8 +51,8 @@
               <% @breakdown.each do |bd| %>
                 <tr>
                   <td><%= bd.name %></td>
-                  <td class="numeric"><%= number_with_delimiter(bd.num_items) %></td>
-                  <td class="numeric"><%= dollar_presentation(bd.amount) %></td>
+                  <td class="numeric"><%= number_with_delimiter(bd.quantity) %></td>
+                  <td class="numeric"><%= dollar_presentation(bd.value) %></td>
                 </tr>
               <% end %>
 
@@ -69,5 +66,3 @@
     </div>
   </div>
 </section>
-
-

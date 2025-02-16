@@ -17,6 +17,7 @@
 #
 
 class Partner < ApplicationRecord
+  has_paper_trail
   resourcify
   require "csv"
 
@@ -26,7 +27,8 @@ class Partner < ApplicationRecord
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
   ].freeze
 
-  enum status: { uninvited: 0, invited: 1, awaiting_review: 2, approved: 3, error: 4, recertification_required: 5, deactivated: 6 }
+  # Status `4` (error) was removed for being obsolete but is intentionally skipped to preserve existing enum values.
+  enum status: { uninvited: 0, invited: 1, awaiting_review: 2, approved: 3, recertification_required: 5, deactivated: 6 }
 
   belongs_to :organization
   belongs_to :partner_group, optional: true
@@ -44,23 +46,16 @@ class Partner < ApplicationRecord
 
   has_many_attached :documents
 
-  validates :organization, presence: true
   validates :name, presence: true, uniqueness: { scope: :organization }
 
-  validates :email, presence: true, uniqueness: { case_sensitive: false },
-    format: { with: URI::MailTo::EMAIL_REGEXP, on: :create }
+  validates :email, presence: true, uniqueness: { case_sensitive: false }, format: { with: URI::MailTo::EMAIL_REGEXP }
 
-  validates :quota, numericality: true, allow_blank: true
+  validates :quota, numericality: { greater_than_or_equal_to: 0 }, allow_blank: true
 
   validate :correct_document_mime_type
 
   before_save { email&.downcase! }
   before_update :invite_new_partner, if: :should_invite_because_email_changed?
-
-  scope :for_csv_export, ->(organization, *) {
-    where(organization: organization)
-      .order(:name)
-  }
 
   scope :alphabetized, -> { order(:name) }
   scope :active, -> { where.not(status: :deactivated) }
@@ -70,32 +65,6 @@ class Partner < ApplicationRecord
   scope :by_status, ->(status) {
     where(status: status.to_sym)
   }
-
-  AGENCY_TYPES = {
-    "CAREER" => "Career technical training",
-    "ABUSE" => "Child abuse resource center",
-    "CHURCH" => "Church outreach ministry",
-    "CDC" => "Community development corporation",
-    "HEALTH" => "Community health program",
-    "OUTREACH" => "Community outreach services",
-    "CRISIS" => "Crisis/Disaster services",
-    "DISAB" => "Developmental disabilities program",
-    "DOMV" => "Domestic violence shelter",
-    "CHILD" => "Early childhood services",
-    "EDU" => "Education program",
-    "FAMILY" => "Family resource center",
-    "FOOD" => "Food bank/pantry",
-    "GOVT" => "Government Agency/Affiliate",
-    "HEADSTART" => "Head Start/Early Head Start",
-    "HOMEVISIT" => "Home visits",
-    "HOMELESS" => "Homeless resource center",
-    "INFPAN" => "Infant/Child Pantry/Closet",
-    "PREG" => "Pregnancy resource center",
-    "REF" => "Refugee resource center",
-    "TREAT" => "Treatment clinic",
-    "WIC" => "Women, Infants and Children",
-    "OTHER" => "Other"
-  }.freeze
 
   ALL_PARTIALS = %w[
     media_information
@@ -142,6 +111,7 @@ class Partner < ApplicationRecord
 
   # better to extract this outside of the model
   def self.import_csv(csv, organization_id)
+    errors = []
     organization = Organization.find(organization_id)
 
     csv.each do |row|
@@ -149,39 +119,35 @@ class Partner < ApplicationRecord
 
       svc = PartnerCreateService.new(organization: organization, partner_attrs: hash_rows)
       svc.call
+      if svc.errors.present?
+        errors << "#{svc.partner.name}: #{svc.partner.errors.full_messages.to_sentence}"
+      end
     end
-  end
-
-  def self.csv_export_headers
-    [
-      "Agency Name",
-      "Agency Email",
-      "Contact Name",
-      "Contact Phone",
-      "Contact Email"
-    ]
-  end
-
-  def csv_export_attributes
-    [
-      name,
-      email,
-      contact_person[:name],
-      contact_person[:phone],
-      contact_person[:email]
-    ]
+    errors
   end
 
   def contact_person
     return @contact_person if @contact_person
-
-    return {} if profile.blank?
 
     @contact_person = {
       name: profile.primary_contact_name,
       email: profile.primary_contact_email,
       phone: profile.primary_contact_phone ||
              profile.primary_contact_mobile
+    }
+  end
+
+  def agency_info
+    return @agency_info if @agency_info
+
+    symbolic_agency_type = profile.agency_type&.to_sym
+    @agency_info = {
+      address: [profile.address1, profile.address2].select(&:present?).join(', '),
+      city: profile.city,
+      state: profile.state,
+      zip_code: profile.zip_code,
+      website: profile.website,
+      agency_type: (symbolic_agency_type == :other) ? "#{I18n.t symbolic_agency_type, scope: :partners_profile}: #{profile.other_agency_type}" : (I18n.t symbolic_agency_type, scope: :partners_profile)
     }
   end
 
@@ -192,7 +158,7 @@ class Partner < ApplicationRecord
   def quantity_year_to_date
     distributions
       .includes(:line_items)
-      .where('distributions.issued_at >= ?', Time.zone.today.beginning_of_year)
+      .where(distributions: { issued_at: Time.zone.today.beginning_of_year.. })
       .references(:line_items).map(&:line_items).flatten.sum(&:quantity)
   end
 
@@ -203,6 +169,10 @@ class Partner < ApplicationRecord
       family_zipcodes: family_zipcodes_count,
       family_zipcodes_list: family_zipcodes_list
     }
+  end
+
+  def quota_exceeded?(total)
+    quota.present? && total > quota
   end
 
   private
@@ -234,6 +204,17 @@ class Partner < ApplicationRecord
   end
 
   def should_invite_because_email_changed?
-    email_changed? and (invited? or awaiting_review? or recertification_required? or approved?)
+    email_changed? &&
+      (
+        invited? ||
+        awaiting_review? ||
+        recertification_required? ||
+        approved?
+      ) &&
+      !partner_user_with_same_email_exist?
+  end
+
+  def partner_user_with_same_email_exist?
+    User.exists?(email: email) && User.find_by(email: email).has_role?(Role::PARTNER, self)
   end
 end

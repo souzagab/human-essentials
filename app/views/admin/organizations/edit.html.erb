@@ -69,7 +69,7 @@
 
                 <%= render 'shared/deadline_day_fields', f: f %>
 
-                <%= f.input :intake_location, :collection => @organization.storage_locations.active_locations.alphabetized, :label_method => :name, :value_method => :id, :label => "Default Intake Location", :include_blank => true, wrapper: :input_group %>
+                <%= f.input :intake_location, :collection => @organization.storage_locations.active.alphabetized, :label_method => :name, :value_method => :id, :label => "Default Intake Location", :include_blank => true, wrapper: :input_group %>
 
                 <%= f.input :invitation_text, label: "Custom Partner Invitation Message", wrapper: :input_group do %>
                   <%= f.text_area :invitation_text, class: "form-control" %>
@@ -79,7 +79,6 @@
                   <%= f.rich_text_area :default_email_text %>
                 <% end %>
 
-
                 <%= f.input :logo, wrapper: :input_group do %>
 
                   <% if @organization.logo.attached? %>
@@ -88,14 +87,14 @@
                         <%= image_tag @organization.logo %>
                       </p>
                       <p>
-                        <a href="#showTheLogo" class="btn btn-xs btn-info" data-toggle="modal">
+                        <a href="#showTheLogo" class="btn btn-xs btn-info" data-bs-toggle="modal">
                           View Original
                         </a>
                       </p>
                       <div id="showTheLogo" class="modal fade">
                         <div class="modal-dialog">
                           <%= image_tag @organization.logo, class: "thumbnail" %>
-                          <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                         </div>
                       </div>
                     </div>

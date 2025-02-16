@@ -16,6 +16,7 @@ class StorageLocationDeactivateService
   private
 
   def valid?
-    @storage_location.size <= 0
+    inventory = View::Inventory.new(@storage_location.organization_id)
+    inventory.quantity_for(storage_location: @storage_location.id) <= 0
   end
 end

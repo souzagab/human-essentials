@@ -45,10 +45,6 @@ RSpec.describe Partner, type: :model do
   end
 
   context "Validations >" do
-    it "must belong to an organization" do
-      expect(build(:partner, organization_id: nil)).not_to be_valid
-    end
-
     it "requires a unique name within an organization" do
       expect(build(:partner, name: nil)).not_to be_valid
       create(:partner, name: "Foo")
@@ -73,9 +69,12 @@ RSpec.describe Partner, type: :model do
       expect(build(:partner, email: "boooooooooo")).not_to be_valid
     end
 
-    it "validates the quota is a number but it is not required" do
-      is_expected.to validate_numericality_of(:quota)
-      expect(build(:partner, email: "foo@bar.com", quota: "")).to be_valid
+    it { should validate_numericality_of(:quota).allow_nil }
+
+    it "validates that the quota is greater than or equal to 0" do
+      expect(build(:partner, quota: -1)).not_to be_valid
+      expect(build(:partner, quota: 0)).to be_valid
+      expect(build(:partner, quota: 1)).to be_valid
     end
   end
 
@@ -132,7 +131,6 @@ RSpec.describe Partner, type: :model do
         expect(build(:partner, status: :invited)).not_to be_deletable
         expect(build(:partner, status: :awaiting_review)).not_to be_deletable
         expect(build(:partner, status: :approved)).not_to be_deletable
-        expect(build(:partner, status: :error)).not_to be_deletable
         expect(build(:partner, status: :recertification_required)).not_to be_deletable
         expect(build(:partner, status: :deactivated)).not_to be_deletable
       end
@@ -168,7 +166,7 @@ RSpec.describe Partner, type: :model do
       context 'when it has a profile and users' do
         it 'should return false' do
           create(:partner_profile, partner_id: partner.id)
-          create(:partners_user, email: partner.email, name: partner.name, partner: partner)
+          create(:partner_user, email: partner.email, name: partner.name, partner: partner)
           expect(partner.reload).not_to be_deletable
         end
       end
@@ -192,7 +190,6 @@ RSpec.describe Partner, type: :model do
       it 'should return false', :aggregate_failures do
         expect(build(:partner, status: :uninvited)).not_to be_approvable
         expect(build(:partner, status: :approved)).not_to be_approvable
-        expect(build(:partner, status: :error)).not_to be_approvable
         expect(build(:partner, status: :recertification_required)).not_to be_approvable
         expect(build(:partner, status: :deactivated)).not_to be_approvable
       end
@@ -216,6 +213,24 @@ RSpec.describe Partner, type: :model do
           resource: partner
         )
       end
+    end
+
+    it "should not call the UserInviteService.invite when the partner is changing email to previously used email" do
+      previous_email = partner.email
+      partner.email = "randomtest@email.com"
+      partner.save!
+      partner.email = previous_email
+      partner.save!
+      expect(UserInviteService).not_to have_received(:invite).with(
+        email: previous_email,
+        roles: [Role::PARTNER],
+        resource: partner
+      )
+      expect(UserInviteService).to have_received(:invite).with(
+        email: "randomtest@email.com",
+        roles: [Role::PARTNER],
+        resource: partner
+      )
     end
 
     [:uninvited, :deactivated].each do |test_status|
@@ -267,28 +282,6 @@ RSpec.describe Partner, type: :model do
     end
   end
 
-  describe "#csv_export_attributes" do
-    let!(:partner) { create(:partner) }
-
-    let(:contact_name) { "Jon Ralfeo" }
-    let(:contact_email) { "jon@entertainment720.com" }
-    let(:contact_phone) { "1231231234" }
-
-    before do
-      partner.profile.update({
-                               primary_contact_name: contact_name,
-                               primary_contact_email: contact_email,
-                               primary_contact_phone: contact_phone
-                             })
-    end
-
-    it "includes contact person information from parnerbase" do
-      expect(partner.csv_export_attributes).to include(contact_name)
-      expect(partner.csv_export_attributes).to include(contact_phone)
-      expect(partner.csv_export_attributes).to include(contact_email)
-    end
-  end
-
   describe '#quantity_year_to_date' do
     let(:partner) { create(:partner) }
     before do
@@ -321,15 +314,15 @@ RSpec.describe Partner, type: :model do
 
   describe "#impact_metrics" do
     subject { partner.impact_metrics }
-    let(:partner) { FactoryBot.create(:partner) }
+    let(:partner) { create(:partner) }
 
     context "when partner has related information" do
-      let!(:family1) { FactoryBot.create(:partners_family, guardian_zip_code: "45612-123", partner: partner) }
-      let!(:family2) { FactoryBot.create(:partners_family, guardian_zip_code: "45612-126", partner: partner) }
-      let!(:family3) { FactoryBot.create(:partners_family, guardian_zip_code: "45612-123", partner: partner) }
+      let!(:family1) { create(:partners_family, guardian_zip_code: "45612-123", partner: partner) }
+      let!(:family2) { create(:partners_family, guardian_zip_code: "45612-126", partner: partner) }
+      let!(:family3) { create(:partners_family, guardian_zip_code: "45612-123", partner: partner) }
 
-      let!(:child1) { FactoryBot.create_list(:partners_child, 2, family: family1) }
-      let!(:child2) { FactoryBot.create_list(:partners_child, 2, family: family3) }
+      let!(:child1) { create_list(:partners_child, 2, family: family1) }
+      let!(:child2) { create_list(:partners_child, 2, family: family3) }
 
       it { is_expected.to eq({families_served: 3, children_served: 4, family_zipcodes: 2, family_zipcodes_list: %w[45612-123 45612-126]}) }
     end
@@ -337,5 +330,31 @@ RSpec.describe Partner, type: :model do
     context "when partner don't have any related information" do
       it { is_expected.to eq({families_served: 0, children_served: 0, family_zipcodes: 0, family_zipcodes_list: []}) }
     end
+  end
+
+  describe "#quota_exceeded?" do
+    it "returns true if partner has a quota and the total given is greater than quota" do
+      partner = build_stubbed(:partner, quota: 100)
+      expect(partner.quota_exceeded?(200)).to eq(true)
+    end
+
+    it "returns false if partner has a quota and the total given is equal to quota" do
+      partner = build_stubbed(:partner, quota: 100)
+      expect(partner.quota_exceeded?(100)).to eq(false)
+    end
+
+    it "returns false if partner has a quota and the total given is less than quota" do
+      partner = build_stubbed(:partner, quota: 100)
+      expect(partner.quota_exceeded?(50)).to eq(false)
+    end
+
+    it "returns false if partner has no quota" do
+      partner = build_stubbed(:partner, quota: nil)
+      expect(partner.quota_exceeded?(50)).to eq(false)
+    end
+  end
+
+  describe "versioning" do
+    it { is_expected.to be_versioned }
   end
 end

@@ -1,6 +1,4 @@
-require 'rails_helper'
-
-describe PartnerApprovalService do
+RSpec.describe PartnerApprovalService do
   describe '#call' do
     subject { described_class.new(partner: partner).call }
     let(:partner) { create(:partner) }
@@ -44,7 +42,7 @@ describe PartnerApprovalService do
         expect(fake_mailer).to have_received(:deliver_later)
       end
 
-      context 'but a unexpected error occured during the save' do
+      context 'but a unexpected error occurred during the save' do
         let(:error_message) { 'boom' }
 
         context 'for partner approval' do

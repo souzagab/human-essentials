@@ -11,7 +11,7 @@ class DistributionMailer < ApplicationMailer
     @partner = distribution.partner
     @distribution = distribution
     @comment = distribution.comment
-    requestee_email = distribution.request ? distribution.request.user_email : @partner.email
+    requester_email = distribution.request ? distribution.request.requester.email : @partner.email
 
     delivery_method = @distribution.delivery? ? 'delivered' : 'picked up'
     @default_email_text = current_organization.default_email_text
@@ -26,17 +26,26 @@ class DistributionMailer < ApplicationMailer
     @distribution_changes = distribution_changes
     pdf = DistributionPdf.new(current_organization, @distribution).compute_and_render
     attachments[format("%s %s.pdf", @partner.name, @distribution.created_at.strftime("%Y-%m-%d"))] = pdf
-    mail(to: requestee_email, cc: @partner.email, subject: "#{subject} from #{current_organization.name}")
+    cc = [@partner.email]
+    if distribution.pick_up? && @partner.profile&.pick_up_email
+      pick_up_emails = @partner.profile.split_pick_up_emails
+      cc.push(pick_up_emails)
+    end
+    cc.flatten!
+    cc.compact!
+    cc.uniq!
+
+    mail(to: requester_email, cc: cc, subject: "#{subject} from #{current_organization.name}")
   end
 
   def reminder_email(distribution_id)
     distribution = Distribution.find(distribution_id)
     @partner = distribution.partner
     @distribution = distribution
-    requestee_email = distribution.request ? distribution.request.user_email : @partner.email
+    requester_email = distribution.request ? distribution.request.requester.email : @partner.email
 
     return if @distribution.past? || !@partner.send_reminders || @partner.deactivated?
 
-    mail(to: requestee_email, cc: @partner.email, subject: "#{@partner.name} Distribution Reminder")
+    mail(to: requester_email, cc: @partner.email, subject: "#{@partner.name} Distribution Reminder")
   end
 end

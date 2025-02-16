@@ -36,7 +36,7 @@
                 <div class="col-3">
                   <%= render_filterrific_spinner %>
                 </div>
-                <div clas="col-9">
+                <div class="col-12">
                   <div class="float-right">
                     <%= new_button_to new_admin_organization_path, { text: "Add New Organization" } %>
                   </div>
@@ -44,10 +44,8 @@
               </div>
             <% end %>
           </div>
-          <div class="card-body p-0">
-            <div id="filterrific_results">
-              <%= render( partial: 'list', locals: { organizations: @organizations }) %>
-            </div>
+          <div id="filterrific_results">
+            <%= render( partial: 'list', locals: { organizations: @organizations }) %>
           </div>
         </div>
         <!-- /.card -->
